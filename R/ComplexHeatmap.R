@@ -19,13 +19,14 @@
 #' @param output_name File name for the saved heatmap. Default is `"complex_heatmap.png"`.
 #' @param class_cols Optional. Named list or vector of colors for classes groups within object. Format: `c("A" = "#hex", ...)`.
 #' @param anno_cols Optional. Named list or vector of colors for additional annotation groups. Format: `c("A" = "#hex", ...)`.
+#' @param ref_pie_chart Optional. Adds a section distribution pie chart of the reference
 #'
-#' @return A PDF file is saved to `output_dir`, visualizing CNV patterns across references and observations with dendrograms and annotations.
+#' @return A image or pdf file is saved to `output_dir`, visualizing CNV patterns across references and observations with dendrograms and annotations.
 #'
 #' @details
-#' - For `dendrogram_file`, a single tree (`phylo`) will apply a global dendrogram, while a multiple tree (`multiPhylo`) input will order spots per clone.
+#' - For `dendrogram_file`, a single tree (`phylo`) will apply a global dendrogram, while a multiple tree (`multiPhylo`) input will order spots by original grouping.
 #' - The function will auto-detect and adjust for reference presence.
-#' - Colors for sample, histology, and clone groups are automatically generated but can be overridden.
+#' - Colors for sample, histology, and clone groups are automatic but can be overridden.
 #' - Chromosome and CNV coloring is derived from inferCNV settings and thresholds.
 #'
 #' @examples
@@ -38,7 +39,8 @@
 #'   annotation_name = "histology",
 #'   annotation_df = "metadata/histologies.tsv",
 #'   class_cols = c("A" = "#FF0000", "B" = "#0000FF"),
-#'   anno_cols = c("A" = "#E41A1C", "B" = "#377EB8")
+#'   anno_cols = c("A" = "#E41A1C", "B" = "#377EB8"),
+#'   ref_pie_chart = TRUE
 #' )
 
 plot_complex_heatmap <- function(infercnv_obj,
@@ -51,7 +53,8 @@ plot_complex_heatmap <- function(infercnv_obj,
                                  output_format = "png",
                                  output_name = "complex_heatmap.png",
                                  class_cols = NULL,
-                                 anno_cols = NULL) {
+                                 anno_cols = NULL,
+                                 ref_pie_chart = FALSE) {
 
   library(ComplexHeatmap)
   library(tidyverse)
@@ -61,6 +64,7 @@ plot_complex_heatmap <- function(infercnv_obj,
   library(gridExtra)
   library(ape)
   library(ggplot2)
+  library(ggrepel)
   library(dendextend)
 
   if (!is.null(annotation_name) && is.null(annotation_df)) {
@@ -455,50 +459,30 @@ plot_complex_heatmap <- function(infercnv_obj,
 
     ref_anno_df$Section <- str_remove(str_remove(rownames(ref_anno_df), "_[^_]*$"), "^[^_]*_")
 
-    ref_anno_df$Histology <- "Benign"
-    ref_anno_df$Clone <- "0"
+    if (is.null(annotation_name)) {
+      ref_anno_df[[obs_class]] <- "Benign"
 
-    ref_anno_type <- c("Section", "Histology", "Clone")
-    ref_anno_col <- list(Section = sample_colors,
-                         Histology = hist_colors,
-                         Clone = clone_colors
-    )
-
-    ref_anno_leg <- list(
-      Section = list(
-        direction = "horizontal",
-        nrow = 1,
-        grid_height = unit(8, "mm"),
-        grid_width  = unit(8, "mm"),
-        labels_gp   = gpar(fontsize = 16),
-        title_gp    = gpar(fontsize = 16,
-                           fontface = "bold")),
-      Histology = list(
-        direction = "horizontal",
-        nrow = 1,
-        grid_height = unit(8, "mm"),
-        grid_width  = unit(8, "mm"),
-        labels_gp   = gpar(fontsize = 16),
-        title_gp    = gpar(fontsize = 16,
-                           fontface = "bold")),
-      Clone = list(
-        direction = "horizontal",
-        nrow = 1,
-        grid_height = unit(8, "mm"),
-        grid_width  = unit(8, "mm"),
-        labels_gp   = gpar(fontsize = 16),
-        title_gp    = gpar(fontsize = 16,
-                           fontface = "bold")
+      ref_left_anno <- rowAnnotation(
+        df = ref_anno_df[, anno_type],
+        col = anno_col,
+        width = unit(19, "mm"),
+        simple_anno_size_adjust = TRUE,
+        gap = unit(3, "mm"),
+        annotation_legend_param = anno_leg
       )
-    )
-    ref_left_anno <- rowAnnotation(
-      df = ref_anno_df[, ref_anno_type],
-      col = ref_anno_col,
-      width = unit(30, "mm"),
-      simple_anno_size_adjust = TRUE,
-      gap = unit(3, "mm"),
-      annotation_legend_param = ref_anno_leg
-    )
+    } else {
+      ref_anno_df[[obs_class]] <- "0"
+      ref_anno_df[[annotation_name]] <- "Benign"
+
+      ref_left_anno <- rowAnnotation(
+        df = ref_anno_df[, anno_type],
+        col = anno_col,
+        width = unit(30, "mm"),
+        simple_anno_size_adjust = TRUE,
+        gap = unit(3, "mm"),
+        annotation_legend_param = anno_leg
+      )
+    }
 
     # Ref heatmap object
     ref_ht <- Heatmap(
@@ -526,6 +510,43 @@ plot_complex_heatmap <- function(infercnv_obj,
       raster_resize_mat = FALSE,
       raster_by_magick = FALSE
     )
+
+    # Ref pie plot
+    ref_section_counts <- ref_anno_df %>%
+      count(Section) %>%
+      rename(group = Section, value = n)
+
+    ref_section_counts <- ref_section_counts %>%
+      arrange(desc(group)) %>%
+      mutate(
+        prop = value / sum(value) * 100,
+        ypos_center = cumsum(prop) - 0.5 * prop
+      )
+
+    ref_pie_plot <- ggplot(ref_section_counts, aes(x = "", y = prop, fill = group)) +
+      geom_bar(stat = "identity", width = 1, color = "white") +
+      coord_polar("y", start = 0) +
+      theme_void() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5, size = 14.4),
+        plot.margin = unit(c(0.5,0,0,0), "cm")
+      ) +
+      geom_label_repel(aes(y = ypos_center, label = paste0(round(prop, 1), "%")),
+                       nudge_x = 1,
+                       segment.colour = "black",
+                       fill = "white",
+                       color = "black",
+                       size = 4,
+                       box.padding = unit(0.5, "lines"),
+                       point.padding = unit(0.5, "lines"),
+                       show.legend = FALSE
+      ) +
+      scale_fill_manual(values = sample_colors, name = "Sections") +
+      labs(title = "Distribution of reference")
+
+    ref_pie_grob <- ggplotGrob(ref_pie_plot)
+
   } else {
     ref_ht <- Heatmap(
       matrix(NA, nrow = 1, ncol = nrow(obs_expr)),
@@ -555,8 +576,14 @@ plot_complex_heatmap <- function(infercnv_obj,
          ht_gap = unit(2, "cm"),
          annotation_legend_side = "bottom"
     )
-    vp <- viewport(x = 0.05, y = 0.95, width = 0.10, height = 0.15, just = c("left", "top"))
-    pushViewport(vp)
+    if (isTRUE(ref_pie_chart)) {
+      pie_vp <- viewport(x = 0.03, y = 0.87, width = 0.15, height = 0.15, just = c("left", "top"))
+      pushViewport(pie_vp)
+      grid.draw(ref_pie_grob)
+      popViewport()
+    }
+    legend_vp <- viewport(x = 0.05, y = 0.97, width = 0.10, height = 0.10, just = c("left", "top"))
+    pushViewport(legend_vp)
     grid.draw(legend_plot_grob)
     popViewport()
     dev.off()
@@ -570,8 +597,14 @@ plot_complex_heatmap <- function(infercnv_obj,
          ht_gap = unit(2, "cm"),
          annotation_legend_side = "bottom"
     )
-    vp <- viewport(x = 0.05, y = 0.95, width = 0.10, height = 0.15, just = c("left", "top"))
-    pushViewport(vp)
+    if (isTRUE(ref_pie_chart)) {
+      pie_vp <- viewport(x = 0.03, y = 0.87, width = 0.15, height = 0.15, just = c("left", "top"))
+      pushViewport(pie_vp)
+      grid.draw(ref_pie_grob)
+      popViewport()
+    }
+    legend_vp <- viewport(x = 0.05, y = 0.97, width = 0.10, height = 0.10, just = c("left", "top"))
+    pushViewport(legend_vp)
     grid.draw(legend_plot_grob)
     popViewport()
     dev.off()
