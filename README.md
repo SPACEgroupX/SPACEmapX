@@ -1,4 +1,4 @@
-<img src="https://www.nds.ox.ac.uk/images/logos/secondary-logo" height="75" /> <img src="https://www.nds.ox.ac.uk/images/logos/primary-logo" height="75"/> 
+<img src="https://www.bci.qmul.ac.uk/wp-content/uploads/2025/12/BCI_QMUL_White_nofill-space.png" height="75" /> <img src="https://www.nds.ox.ac.uk/images/logos/secondary-logo" height="75" /> <img src="https://www.nds.ox.ac.uk/images/logos/primary-logo" height="75"/> 
 <img src="https://github.com/user-attachments/assets/3615186f-6b02-4df3-a012-afe77714044a" height="75" />
 
 
